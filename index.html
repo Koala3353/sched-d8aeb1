@@ -177,6 +177,14 @@ footer{text-align:center;color:var(--mut);font-size:11px;padding:20px}
           <label><input type="radio" name="gender" value="M"> Men (hide women-only)</label>
           <label><input type="radio" name="gender" value=""> Show all</label>
         </div>
+        <div class="flex" style="margin-top:8px">
+          <span>Max back-to-back classes:</span>
+          <select id="maxConsec">
+            <option value="0">off</option><option value="2">2</option><option value="3">3</option>
+            <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+          </select>
+          <span class="small mut">sessions less than 15 min apart count as consecutive; suggestions that would chain more than this get dropped</span>
+        </div>
       </div>
       <div class="card">
         <h2>Blocked times</h2>
@@ -87191,6 +87199,7 @@ function defaultPrios() {
 }
 const DEFAULTS = () => ({
   gender: "", blocks: [], taken: [], activeCombo: 0,
+  maxConsec: 0,
   dead: [], got: [], slotPatch: {},
   explore: {theo:false, flc:false, pft:false},
   prio: defaultPrios(),
@@ -87336,6 +87345,22 @@ function conflictReason(cls) {
       reasons.push(`your blocked time: ${DAYNAMES[b.d]} ${fmtMin(b.s)}–${fmtMin(b.e)}${b.label ? " (" + b.label + ")" : ""}`);
   return reasons;
 }
+/* longest run of class sessions with <15 min between them, across all days */
+function maxChainLen(classes) {
+  const byDay = {};
+  for (const cls of classes) for (const m of cls.meetings) (byDay[m.d] = byDay[m.d] || []).push(m);
+  let worst = 0;
+  for (const day of Object.values(byDay)) {
+    day.sort((a, b) => a.s - b.s);
+    let run = 0, prevEnd = -999;
+    for (const m of day) {
+      run = (m.s - prevEnd < 15) ? run + 1 : 1;
+      prevEnd = Math.max(prevEnd, m.e);
+      if (run > worst) worst = run;
+    }
+  }
+  return worst;
+}
 const tbaPill = cls => cls.meetings.length ? "" : ` <span class="pill free-mid">TBA sched</span>`;
 const famOrder = c => c.subject === "THEO 12" ? 0 : c.subject.startsWith("NSTP") ? 1 : DATA.subjects.flcCodes.includes(c.subject) ? 2 : 3;
 const famLabel = c => ["THEO 12", "NSTP 11(CWTS)", c.subject + " (FLC 11)", c.subject + " (PATHFit 3)"][famOrder(c)];
@@ -87443,6 +87468,17 @@ function bestCombos(limit) {
     combos = next;
   }
   combos = combos.filter(c => c.classes.length);
+  if (S.maxConsec > 0 && combos.length) {
+    const fixed = [...S.taken, ...S.got].map(id => CLS[id]).filter(Boolean);
+    // never stricter than what the pre-enlisted classes already force
+    const allowed = Math.max(S.maxConsec, maxChainLen(fixed));
+    const before = combos.length;
+    combos = combos.filter(c => maxChainLen([...fixed, ...c.classes]) <= allowed);
+    if (before && !combos.length)
+      dimWarnings.push(`Every combination would exceed your limit of ${S.maxConsec} back-to-back classes — raise it in Settings › Profile or adjust your lists.`);
+    if (allowed > S.maxConsec)
+      dimWarnings.push(`Heads up: your pre-enlisted classes alone already chain ${allowed} sessions back-to-back, so the limit is applied as ${allowed}.`);
+  }
   for (const c of combos) {
     c.tierScore = c.classes.reduce((s, cl) => s + TIER_VAL[tierOf(cl)], 0);
     const frees = c.classes.filter(cl => cl.free !== "" && !isNaN(+cl.free)).map(cl => +cl.free);
@@ -87492,10 +87528,11 @@ function comboRow(cls, kind, extraNote) {
   const conf = conflictReason(cls);
   const rowCls = isFull(cls) ? "dead" : conf.length ? "conf" : "";
   const confPill = conf.length ? ` <span class="tooltip"><span class="pill free-lo">conflict</span><span class="tip">${esc("Blocked by:\n• " + conf.join("\n• "))}</span></span>` : "";
+  const remPill = cls.remarks ? ` <span class="tooltip"><span class="pill tier-U">ℹ</span><span class="tip">${esc("AISIS remarks:\n" + cls.remarks)}</span></span>` : "";
   return `<tr class="${rowCls}"><td><b>${esc(cls.subject)}</b></td><td><b>${esc(cls.section)}</b></td>
   <td>${esc(cls.time.replace(" (FULLY ONSITE)",""))}${tbaPill(cls)}</td>
   <td>${esc((cls.instructor||"").split(",").slice(0,2).join(","))} ${tierPill(cls)}</td>
-  <td>${freePill(cls.free)}${autoFull?` <span class="pill free-lo">FULL</span>`:""}${confPill}${cls.gender?` <span class="pill tier-U">${cls.gender==="F"?"women":"men"} only</span>`:""}${extraNote?` <span class="small mut">${esc(extraNote)}</span>`:""}</td>
+  <td>${freePill(cls.free)}${autoFull?` <span class="pill free-lo">FULL</span>`:""}${confPill}${remPill}${cls.gender?` <span class="pill tier-U">${cls.gender==="F"?"women":"men"} only</span>`:""}${extraNote?` <span class="small mut">${esc(extraNote)}</span>`:""}</td>
   <td style="white-space:nowrap">${dead?`<button class="mini" data-undead="${cls.id}">undo</button>`:`<button class="mini" data-dead="${cls.id}" title="mark full / skip">⊘ full</button>`}</td></tr>`;
 }
 let lastCombos = [];
@@ -87625,6 +87662,7 @@ function renderDnd(ul, items, labelFn, onRemove) {
 }
 function renderSettings() {
   $$("input[name=gender]").forEach(r => r.checked = r.value === S.gender);
+  $("#maxConsec").value = String(S.maxConsec || 0);
   renderDnd($("#prioTheo"), S.prio.theo, labelTheo, i => { S.prio.theo.splice(i,1); save(); renderSettings(); });
   renderDnd($("#prioFlc"), S.prio.flc, p => labelCls(p.id), i => { S.prio.flc.splice(i,1); save(); renderSettings(); });
   renderDnd($("#prioPft"), S.prio.pft, p => labelCls(p.id), i => { S.prio.pft.splice(i,1); save(); renderSettings(); });
@@ -87653,6 +87691,7 @@ function renderSettings() {
   $("#dataInfo").textContent = `${CLASSES.length} class sections loaded · ${DATA.term}` + (S.csvNote ? ` · ${S.csvNote}` : " · from build scrape");
 }
 $$("input[name=gender]").forEach(r => r.onchange = () => { S.gender = r.value; save(); renderSettings(); });
+$("#maxConsec").onchange = e => { S.maxConsec = +e.target.value; save(); };
 $("#expTheo").onchange = e => { S.explore.theo = e.target.checked; save(); };
 $("#expFlc").onchange = e => { S.explore.flc = e.target.checked; save(); };
 $("#expPft").onchange = e => { S.explore.pft = e.target.checked; save(); };
