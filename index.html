@@ -87200,11 +87200,18 @@ $("#btnParse").onclick = () => {
 };
 $("#btnClearTaken").onclick = () => { S.taken = []; save(); $("#pasteBox").value = ""; renderTaken([]); };
 $("#btnDemo").onclick = () => {
-  const demo = ["C MATH 31.3 MATHEMATICAL ANALYSIS IIA 3 Y MATH 31.3 " + (find("MATH 31.3","A")?"A":CLASSES.find(c=>c.subject==="MATH 31.3").section),
-    "C HISTO 12 RIZAL AND THE EMERGENCE OF THE PHILIPPINE NATION 3 Y HISTO 12 " + CLASSES.find(c=>c.subject==="HISTO 12").section,
-    "M FAA 101.10 FUNDAMENTALS OF ACCOUNTING 3 Y FAA 101.10 " + CLASSES.find(c=>c.subject==="FAA 101.10").section,
-    "M LLAW 115 OBLIGATIONS AND CONTRACTS 3 Y LLAW 115 " + CLASSES.find(c=>c.subject==="LLAW 115").section,
-    "C STS 10 SCIENCE TECHNOLOGY AND SOCIETY 3 Y STS 10 " + CLASSES.find(c=>c.subject==="STS 10").section].join("\n");
+  // A hand-picked, conflict-free spread across all six days (Mon-Sat) so the
+  // sample run looks like a real IPS instead of five "section A"s piled on
+  // the same M-TH morning slot.
+  const DEMO_PICKS = [["MATH 31.3","L"], ["HISTO 12","B"], ["FAA 101.10","ST2"], ["LLAW 115","YW"], ["STS 10","N2"]];
+  const sec = (subj, fallbackSec) => { const c = find(subj, fallbackSec); return c ? c.section : CLASSES.find(c => c.subject === subj).section; };
+  const demo = [
+    "C MATH 31.3 MATHEMATICAL ANALYSIS IIA 3 Y MATH 31.3 " + sec("MATH 31.3", "L"),
+    "C HISTO 12 RIZAL AND THE EMERGENCE OF THE PHILIPPINE NATION 3 Y HISTO 12 " + sec("HISTO 12", "B"),
+    "M FAA 101.10 FUNDAMENTALS OF ACCOUNTING 3 Y FAA 101.10 " + sec("FAA 101.10", "ST2"),
+    "M LLAW 115 OBLIGATIONS AND CONTRACTS 3 Y LLAW 115 " + sec("LLAW 115", "YW"),
+    "C STS 10 SCIENCE TECHNOLOGY AND SOCIETY 3 Y STS 10 " + sec("STS 10", "N2"),
+  ].join("\n");
   $("#pasteBox").value = demo; $("#btnParse").click();
 };
 function renderTaken(unparsed) {
