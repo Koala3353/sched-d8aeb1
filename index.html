@@ -87295,13 +87295,18 @@ $("#btnDemo").onclick = () => {
 };
 function renderTaken(unparsed) {
   const tb = $("#takenTable tbody"); tb.innerHTML = "";
+  const clashIds = new Set(takenOverlaps().flatMap(([a, b]) => [a.id, b.id]));
   for (const id of S.taken) {
     const c = CLS[id]; if (!c) continue;
-    tb.insertAdjacentHTML("beforeend", `<tr><td><b>${esc(c.subject)}</b></td><td>${esc(c.section)}</td><td>${esc(c.title)}</td><td>${esc(c.time.replace(" (FULLY ONSITE)",""))}</td><td>${esc(c.room)}</td><td>${esc(c.instructor)}</td><td><span class="x" style="color:var(--bad);cursor:pointer;font-weight:700" data-rm="${id}">✕</span></td></tr>`);
+    const clash = clashIds.has(id);
+    tb.insertAdjacentHTML("beforeend", `<tr${clash ? ' style="background:#fef2f2"' : ""}><td><b>${esc(c.subject)}</b>${clash ? ' <span class="pill free-lo">clash</span>' : ""}</td><td>${esc(c.section)}</td><td>${esc(c.title)}</td><td>${esc(c.time.replace(" (FULLY ONSITE)",""))}</td><td>${esc(c.room)}</td><td>${esc(c.instructor)}</td><td><span class="x" style="color:var(--bad);cursor:pointer;font-weight:700" data-rm="${id}">✕</span></td></tr>`);
   }
   tb.querySelectorAll("[data-rm]").forEach(x => x.onclick = () => { S.taken = S.taken.filter(i => i !== +x.dataset.rm); save(); renderTaken([]); });
-  $("#unparsed").innerHTML = unparsed && unparsed.length
-    ? `<div class="warnbox"><b>Couldn't match these lines</b> — add them manually below if they're real classes:<br>${unparsed.map(esc).join("<br>")}</div>` : "";
+  const overlaps = takenOverlaps();
+  const overlapBox = overlaps.length
+    ? `<div class="errbox"><b>⛔ Two taken classes are at the same time</b> — impossible in a real schedule, so one was likely matched to the wrong section. Remove the wrong one (✕) and re-add it correctly:<br>${overlaps.map(([a, b]) => `&bull; ${esc(a.subject + " " + a.section)} vs ${esc(b.subject + " " + b.section)} — both ${esc(a.time.replace(" (FULLY ONSITE)","").split("(")[0])}`).join("<br>")}</div>` : "";
+  $("#unparsed").innerHTML = overlapBox + (unparsed && unparsed.length
+    ? `<div class="warnbox"><b>Couldn't match these lines</b> — add them manually below if they're real classes:<br>${unparsed.map(esc).join("<br>")}</div>` : "");
 }
 /* manual add — defaults to this semester's actual enlistable subjects
    (per the batch dashboard), with an opt-out to the full merged catalog
@@ -87325,6 +87330,23 @@ const overlap = (a,b) => a.d === b.d && a.s < b.e && b.s < a.e;
 function conflictsWith(cls, meetingsList) {
   for (const m of cls.meetings) for (const mm of meetingsList) if (overlap(m, mm)) return true;
   return false;
+}
+/* true if a set of classes contains ANY two sessions at the same time */
+function setHasOverlap(classes) {
+  const ms = [];
+  for (const c of classes) { if (conflictsWith(c, ms)) return true; ms.push(...c.meetings); }
+  return false;
+}
+/* pairs of already-enlisted/taken classes that impossibly overlap
+   (a real AISIS schedule can't double-book you — signals a bad paste match) */
+function takenOverlaps() {
+  const cls = [...new Set([...S.taken, ...S.got])].map(id => CLS[id]).filter(Boolean);
+  const out = [];
+  for (let i = 0; i < cls.length; i++)
+    for (let j = i + 1; j < cls.length; j++)
+      if (cls[i].meetings.some(m => cls[j].meetings.some(n => overlap(m, n))))
+        out.push([cls[i], cls[j]]);
+  return out;
 }
 function takenMeetings() {
   const ms = [];
@@ -87421,7 +87443,7 @@ function bestCombos(limit) {
   const base = takenMeetings();
   const done = dimensionsDone();
   const dimWarnings = [];
-  const openOpt = o => !o.classes.some(isFull) && !o.classes.some(cl => conflictsWith(cl, base));
+  const openOpt = o => !o.classes.some(isFull) && !o.classes.some(cl => conflictsWith(cl, base)) && !setHasOverlap(o.classes);
   let pairAlt = [], pairDone = [];
   if (done.theo && done.nstp) pairDone = [done.theo, done.nstp];
   else if (done.theo) {
@@ -87470,8 +87492,12 @@ function bestCombos(limit) {
     combos = next;
   }
   combos = combos.filter(c => c.classes.length);
+  const fixedClasses = [...new Set([...S.taken, ...S.got])].map(id => CLS[id]).filter(Boolean);
+  // hard guarantee: no suggested combo may overlap taken classes, blocked
+  // times, or itself — not one minute of two things at once, ever.
+  combos = combos.filter(c => !setHasOverlap([...fixedClasses, ...c.classes]) && !c.classes.some(cl => conflictsWith(cl, S.blocks)));
   if (S.maxConsec > 0 && combos.length) {
-    const fixed = [...S.taken, ...S.got].map(id => CLS[id]).filter(Boolean);
+    const fixed = fixedClasses;
     // never stricter than what the pre-enlisted classes already force
     const allowed = Math.max(S.maxConsec, maxChainLen(fixed));
     const before = combos.length;
@@ -87578,7 +87604,9 @@ function renderPlan() {
   lastCombos = combos;
   for (const w of dimWarnings) warns.push(esc(w));
   if (S.dead.length) warns.push(`${S.dead.length} section(s) marked full (⊘) and excluded from suggestions. <button class="mini" data-cleardead="1">clear all marks</button>`);
-  $("#planWarnings").innerHTML = warns.map(w => `<div class="warnbox">⚠ ${w}</div>`).join("");
+  const overlapErr = takenOverlaps().map(([a, b]) =>
+    `<div class="errbox">⛔ <b>Impossible overlap:</b> ${esc(a.subject + " " + a.section)} (${esc(a.time.replace(" (FULLY ONSITE)",""))}) and ${esc(b.subject + " " + b.section)} (${esc(b.time.replace(" (FULLY ONSITE)",""))}) are at the same time. A real schedule can't do this — one was likely matched to the wrong section. Fix it on the Paste tab.</div>`).join("");
+  $("#planWarnings").innerHTML = overlapErr + warns.map(w => `<div class="warnbox">⚠ ${w}</div>`).join("");
 
   if (S.activeCombo >= combos.length) S.activeCombo = 0;
   const cb = $("#combos");
