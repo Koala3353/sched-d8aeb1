@@ -113,6 +113,13 @@ footer{text-align:center;color:var(--mut);font-size:11px;padding:20px}
     </div>
   </div>
   <div class="card">
+    <h2>Pre-enlisted subjects <span class="small mut">(manual fallback)</span></h2>
+    <p class="small mut">These 5 are already on your IPS. If the paste above didn't catch one, pick its section here — the schedule, room, prof, and free slots load automatically and it blocks the grid.</p>
+    <table class="list" id="preTable"><thead><tr>
+      <th>Subject</th><th>Section</th><th>Schedule</th><th>Room</th><th>Instructor</th><th>Slots</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
     <h2>Enlisted / taken classes <span class="small mut">(these block the grid)</span></h2>
     <div id="unparsed"></div>
     <table class="list" id="takenTable"><thead><tr>
@@ -87307,6 +87314,30 @@ function renderTaken(unparsed) {
     ? `<div class="errbox"><b>⛔ Two taken classes are at the same time</b> — impossible in a real schedule, so one was likely matched to the wrong section. Remove the wrong one (✕) and re-add it correctly:<br>${overlaps.map(([a, b]) => `&bull; ${esc(a.subject + " " + a.section)} vs ${esc(b.subject + " " + b.section)} — both ${esc(a.time.replace(" (FULLY ONSITE)","").split("(")[0])}`).join("<br>")}</div>` : "";
   $("#unparsed").innerHTML = overlapBox + (unparsed && unparsed.length
     ? `<div class="warnbox"><b>Couldn't match these lines</b> — add them manually below if they're real classes:<br>${unparsed.map(esc).join("<br>")}</div>` : "");
+  renderPreEnlisted();
+}
+/* per-subject section pickers for the 5 pre-enlisted subjects (paste fallback) */
+function renderPreEnlisted() {
+  const tb = $("#preTable tbody"); if (!tb) return;
+  tb.innerHTML = "";
+  for (const subj of (DATA.subjects.preEnlisted || [])) {
+    const secs = CLASSES.filter(c => c.subject === subj).sort((a, b) => a.section.localeCompare(b.section, undefined, {numeric: true}));
+    const chosen = S.taken.map(id => CLS[id]).find(c => c && c.subject === subj);
+    const opts = `<option value="">— pick section —</option>` + secs.map(c =>
+      `<option value="${c.id}"${chosen && chosen.id === c.id ? " selected" : ""}>${esc(c.section)} — ${esc(c.time.replace(" (FULLY ONSITE)",""))}${c.free !== "" ? " · " + c.free + " free" : ""}</option>`).join("");
+    tb.insertAdjacentHTML("beforeend", `<tr><td><b>${esc(subj)}</b></td>
+      <td><select data-presubj="${esc(subj)}">${opts}</select></td>
+      <td>${chosen ? esc(chosen.time.replace(" (FULLY ONSITE)","")) : '<span class="mut small">not set</span>'}</td>
+      <td>${chosen ? esc(chosen.room) : ""}</td>
+      <td>${chosen ? esc((chosen.instructor || "").split(",").slice(0,2).join(",")) : ""}</td>
+      <td>${chosen ? freePill(chosen.free) : ""}</td></tr>`);
+  }
+  tb.querySelectorAll("[data-presubj]").forEach(sel => sel.onchange = () => {
+    const subj = sel.getAttribute("data-presubj");
+    S.taken = S.taken.filter(id => { const c = CLS[id]; return !c || c.subject !== subj; });
+    if (sel.value) S.taken.push(+sel.value);
+    save(); renderTaken([]);
+  });
 }
 /* manual add — defaults to this semester's actual enlistable subjects
    (per the batch dashboard), with an opt-out to the full merged catalog
